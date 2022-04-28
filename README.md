@@ -45,23 +45,23 @@ This will do the following:
 8. Wait for all packages to reconcile and validate the platform is installed successfully
 9. Expose TAP GUI and all ingress/httpproxy objects using the suffix 127.0.0.1.nip.io alllowing local access from your browser
   
-## Delete a local TAP installation
+## Delete function
 This will do the following:
 1. Delete the TCE Cluster
 2. Delete the local registry
 
-## Check Status
+## Status function
 This will do the following:
 1. Check the status of the TCE cluster
 2. Check the status of the local registry
 3. Check the status of all the TAP Packages
   
-## Stop a local TAP installation
+## Stop function
 This will do the following:
 1. Stop the TCE Cluster
 2. Stop the local registry container
 
-## Start a local TAP installation
+## Start function
 This will do the following:
 1. Start the TCE Cluster
 2. Start the local registry container
