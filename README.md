@@ -8,6 +8,7 @@ In order to use this script you must have the following installed on your system
 1. Docker
 2. Kubectl
 3. jq
+4. TCE v0.12.rc2 or later
   
 ## Resources
 You also need the following minimum resources:
