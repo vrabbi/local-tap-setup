@@ -1,32 +1,72 @@
-#!/bin/bash
-declare -A arguments=();
-declare -A variables=();
-declare -i index=1;
-variables["--action"]="action";
-variables["--tanzunet-user"]="tanzunet_user";
-variables["--tanzunet-password"]="tanzunet_password";
-variables["--tbs-descriptor"]="tbs_descriptor";
-variables["--tce-package-repo-url"]="tce_package_repo_url";
-variables["--tap-package-repo-url"]="tap_package_repo_url";
-variables["--kyverno-package-repo-url"]="kyverno_package_repo_url";
-variables["--dockerhub-registry-mirror"]="dockerhub_registry_mirror";
-variables["--tap-gui-catalog-url"]="tap_gui_catalog_url";
-variables["--help"]="help";
-for i in "$@"
-do
-  arguments[$index]=$i;
-  prev_index="$(expr $index - 1)";
-  if [[ $i == *"="* ]]
-    then argument_label=${i%=*}
-    else argument_label=${arguments[$prev_index]}
-  fi
-  if [[ $i == "--help" ]]; then
-    cat << EOF
+#!/usr/bin/env bash
+if [[ $# == 0 ]]; then
+  echo "No Flags were passed. Run with --help flag to get usage information"
+  exit 1
+fi
+while test $# -gt 0; do
+  case "$1" in
+    --action)
+      shift
+      action=$1
+      shift
+      ;;
+    --tanzunet-user)
+      shift
+      tanzunet_user=$1
+      shift
+      ;;
+    --tanzunet-password)
+      shift
+      tanzunet_password=$1
+      shift
+      ;;
+    --tbs-descriptor)
+      shift
+      tbs_descriptor=$1
+      shift
+      ;;
+    --tce-package-repo-url)
+      shift
+      tce_package_repo_url=$1
+      shift
+      ;;
+    --tap-package-repo-url)
+      shift
+      tap_package_repo_url=$1
+      shift
+      ;;
+    --kyverno-package-repo-url)
+      shift
+      kyverno_package_repo_url=$1
+      shift
+      ;;
+    --dockerhub-registry-mirror)
+      shift
+      dockerhub_registry_mirror=$1
+      shift
+      ;;
+    --tap-gui-catalog-url)
+      shift
+      tap_gui_catalog_url=$1
+      shift
+      ;;
+    --tap-version)
+      shift
+      tap_version=$1
+      shift
+      ;;
+    --tap-profile)
+      shift
+      tap_profile=$1
+      shift
+      ;;
+    --help)
+      cat << EOF
 Usage: local-tap.sh [OPTIONS]
 Options:
 
 [Global Manadatory Flags]
-  --action : What action to take - create,stop,start,status or delete
+  --action : What action to take - create,stop,start,status,delete,prepare
 
 [Global Optional Flags]
   --help : show this help menu
@@ -34,40 +74,44 @@ Options:
 [Mandatory Flags - For Create Action]
   --tanzunet-user : User for Tanzu Network
   --tanzunet-password : Password for Tanzu Network
-  --tap-package-repo-url : URL For Relocated TAP 1.1.0 Package Repository
+  --tap-package-repo-url : URL For Relocated TAP Package Repository
 
 [Optional Flags - For Create Action]
+  --tap-profile : TAP Installation Profile. (Default full)
+  --tap-version : Version of TAP. - (Default 1.1.0)
   --tbs-descriptor
-  --tce-package-repo-url : URL For Tanzu Community Edition Package Repository. - (Default: projects.registry.vmware.com/tce/main:0.12.0-rc4)
+  --tce-package-repo-url : URL For Tanzu Community Edition Package Repository. - (Default: projects.registry.vmware.com/tce/main:0.12.0)
   --kyverno-package-repo-url : URL For Kyverno Package Repository. - (Default: ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.3)
   --dockerhub-registry-mirror : URL for Dockerhub Registry Mirror to be configured in containerd on the cluster. - (Default: null)
   --tap-gui-catalog-url : Github URL for the TAP GUI Catalog. - (Default: https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml)
 
 EOF
-    exit 1
-  else
-    if [[ -n $argument_label ]] ; then
-      if [[ -n ${variables[$argument_label]} ]]
-        then
-            if [[ $i == *"="* ]]
-                then declare ${variables[$argument_label]}=${i#$argument_label=}
-              else declare ${variables[$argument_label]}=${arguments[$index]}
-            fi
-      fi
-    fi
-  fi
-  index=index+1;
-done;
-
-# Validate that flags were passed to the invocation
-if [[ ${#arguments[@]} -eq 0 ]]; then
-  echo "No Flags were passed. Run with --help flag to get usage information"
+      exit 1
+      ;;
+    *)
+      echo "$1 is not a recognized flag!"
+      exit 1
+      ;;
+  esac
+done
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)     machine_os=Linux;;
+    Darwin*)    machine_os=Mac;;
+    *)          machine_os="UNKNOWN:${unameOut}"
+esac
+if [[ $machine_os != "Mac" && $machine_os != "Linux" ]]; then
+  echo "Only Mac and Linux are currently supported. your machine returned the type of $machine_os"
+  exit 1
 fi
 
 # Validate an action was selected
 if ! [[ $action ]]; then
   echo "You must specify the action the script should perform via the --action flag"
   exit 1
+fi
+if ! [[ $tap_version ]]; then
+  tap_version="1.1.0"
 fi
 
 NC='\033[0m'           # Text Reset
@@ -89,7 +133,77 @@ print_package_status () {
   fi
 }
 start=`date +%s`
-if [[ $action == "status" ]]; then
+if [[ $action == "prepare" ]]; then
+  echo "Installing Prereqs if not present or of the wrong version"
+
+  if [[ $machine_os != "Mac" && $machine_os != "Linux" ]]; then
+    echo "Only Mac and Linux are currently supported. your machine returned the type of $machine_os"
+    exit 1
+  fi
+  echo "Checking if Tanzu CLI is installed"
+  if ! command -v tanzu &> /dev/null
+  then
+    echo -e "${B}Tanzu CLI is not installed. installing now${NC}"
+    if [[ $machine_os == "Linux" ]]; then
+      curl -H "Accept: application/vnd.github.v3.raw" -L https://api.github.com/repos/vmware-tanzu/community-edition/contents/hack/get-tce-release.sh | bash -s v0.12.0 linux
+      tar -zxvf tce-linux-amd64-v0.12.0.tar.gz
+      cd tce-linux-amd64-v0.12.0
+      ./install.sh
+    elif [[ $machine_os == "Mac" ]]; then
+      curl -H "Accept: application/vnd.github.v3.raw" -L https://api.github.com/repos/vmware-tanzu/community-edition/contents/hack/get-tce-release.sh | bash -s v0.12.0 darwin
+      tar -zxvf tce-darwin-amd64-v0.12.0.tar.gz
+      cd tce-darwin-amd64-v0.12.0
+      ./install.sh
+    fi
+  else
+    echo -e "${BG}Tanzu CLI is already installed${NC}"
+    echo "Checking if Tanzu CLI is up to date"
+    if [[ `tanzu version` != *2022-05-04* ]]; then
+      echo -e "${B}Tanzu CLI is not up to date. Updating now.${NC}"
+      if [[ $machine_os == "Linux" ]]; then
+        curl -H "Accept: application/vnd.github.v3.raw" -L https://api.github.com/repos/vmware-tanzu/community-edition/contents/hack/get-tce-release.sh | bash -s v0.12.0 linux
+        tar -zxvf tce-linux-amd64-v0.12.0.tar.gz
+        cd tce-linux-amd64-v0.12.0
+        ./install.sh
+      elif [[ $machine_os == "Mac" ]]; then
+        curl -H "Accept: application/vnd.github.v3.raw" -L https://api.github.com/repos/vmware-tanzu/community-edition/contents/hack/get-tce-release.sh | bash -s v0.12.0 darwin
+        tar -zxvf tce-darwin-amd64-v0.12.0.tar.gz
+        cd tce-darwin-amd64-v0.12.0
+        ./install.sh
+      fi
+      echo -e "${BG}Tanzu CLI has been updated${NC}"
+    else
+      echo -e "${BG}Tanzu CLI is installed already with the right version${NC}"
+    fi
+
+  fi
+  echo "Checking if Kubectl is installed"
+  if ! command -v kubectl &> /dev/null
+  then
+    echo -e "${B}kubectl is not installed. installing now.${NC}"
+    if [[ $machine_os == "Linux" ]]; then
+      curl -LO https://dl.k8s.io/release/v1.21.12/bin/linux/amd64/kubectl
+      sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    elif [[ $machine_os == "Mac" ]]; then
+      curl -LO https://dl.k8s.io/release/v1.21.12/bin/darwin/amd64/kubectl
+      chmod +x ./kubectl
+      sudo mv ./kubectl /usr/local/bin/kubectl
+      sudo chown root: /usr/local/bin/kubectl
+    fi
+    echo -e "${BG}Kubectl is now installed${NC}"
+  else
+    echo -e "${BG}Kubectl is already installed${NC}"
+  fi
+  echo "Checking if Docker is installed"
+  if ! command -v docker &> /dev/null
+  then
+    echo -e "${BR}ERROR: Docker is not installed. please install docker or docker desktop and then try again.${NC}"
+    exit 1
+  else
+    echo -e "${BG}Docker is already installed${NC}"
+  fi
+
+elif [[ $action == "status" ]]; then
   cls_status=`tanzu uc list -o json | jq -r '.[] | select(.name=="tce-tap") | .status'`
   if [[ $cls_status == "Running" ]]; then
     echo -e "${B}Cluster Status: ${BG}$cls_status${NC}"
@@ -108,11 +222,10 @@ if [[ $action == "status" ]]; then
   fi
   if [[ `tanzu uc list -o json | jq -r '.[] | select(.name=="tce-tap") | .status'` == "Running" ]]; then
     echo -e "${B}Package Statuses:${NC}"
+    tap_profile=`kubectl get secret -n tkg-system tap-config -o json | jq '.data["values.yml"]' -r | base64 -d | head -n 1 | cut -d ":" -f2`
     print_package_status "TAP Meta Package" tkg-system tap
     print_package_status "Secretgen Controller" tkg-system secretgen-controller
     print_package_status "kyverno" tkg-system kyverno
-    print_package_status "Accelerator" tap-install accelerator
-    print_package_status "API Portal" tap-install api-portal
     print_package_status "App Liveview" tap-install appliveview
     print_package_status "App Liveview Connector" tap-install appliveview-connector
     print_package_status "App Liveview Conventions" tap-install appliveview-conventions
@@ -124,21 +237,25 @@ if [[ $action == "status" ]]; then
     print_package_status "Conventions Controller" tap-install conventions-controller
     print_package_status "Developer Conventions" tap-install developer-conventions
     print_package_status "FluxCD Source Controller" tap-install fluxcd-source-controller
-    print_package_status "Grype" tap-install grype
     print_package_status "Image Policy Webhook" tap-install image-policy-webhook
-    print_package_status "Metadata Store" tap-install metadata-store
     print_package_status "OOTB Delivery - Basic" tap-install ootb-delivery-basic
     print_package_status "OOTB Supply Chain - Basic" tap-install ootb-supply-chain-basic
     print_package_status "OOTB Templates" tap-install ootb-templates
-    print_package_status "Scanning" tap-install scanning
     print_package_status "Service Bindings" tap-install service-bindings
     print_package_status "Services Toolkit" tap-install services-toolkit
     print_package_status "Source Controller" tap-install source-controller
     print_package_status "Spring Boot Conventions" tap-install spring-boot-conventions
     print_package_status "TAP Auth" tap-install tap-auth
-    print_package_status "TAP GUI" tap-install tap-gui
     print_package_status "TAP Telemetry" tap-install tap-telemetry
     print_package_status "Tekton Pipelines" tap-install tekton-pipelines
+    if [[ $tap_profile == " full" ]]; then
+      print_package_status "Metadata Store" tap-install metadata-store
+      print_package_status "Accelerator" tap-install accelerator
+      print_package_status "API Portal" tap-install api-portal
+      print_package_status "Grype" tap-install grype
+      print_package_status "Scanning" tap-install scanning
+      print_package_status "TAP GUI" tap-install tap-gui
+    fi
   fi
   end=`date +%s`
   runtime=$((end-start))
@@ -194,6 +311,9 @@ elif [[ $action == "create" ]]; then
     exit 1
   fi
   # Default Values if not overridden via input flags
+  if ! [[ $tap_profile ]]; then
+    tap_profile="full"
+  fi
   if ! [[ $tbs_descriptor ]]; then
     tbs_descriptor="lite"
   fi
@@ -201,7 +321,7 @@ elif [[ $action == "create" ]]; then
     kyverno_package_repo_url="ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.3"
   fi
   if ! [[ $tce_package_repo_url ]]; then
-    tce_package_repo_url="projects.registry.vmware.com/tce/main:0.12.0-rc4"
+    tce_package_repo_url="projects.registry.vmware.com/tce/main:0.12.0"
   fi
   if ! [[ $tap_gui_catalog_url ]]; then
     tap_gui_catalog_url="https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml"
@@ -228,10 +348,11 @@ InstallPackages:
 - name: kyverno
   version: 2.3.3
 - name: tap
-  version: 1.1.0
+  version: $tap_version
   config: tap-values.yaml
 EOF
-  cat << EOF > tap-values.yaml
+  if [[ $tap_profile == "full" ]]; then
+    cat << EOF > tap-values.yaml
 profile: full
 ceip_policy_disclosed: true
 buildservice:
@@ -282,6 +403,33 @@ accelerator:
 metadata_store:
   app_service_type: NodePort
 EOF
+  elif [[ $tap_profile == "iterate" ]]; then
+    cat << EOF > tap-values.yaml
+profile: iterate
+ceip_policy_disclosed: true
+buildservice:
+  kp_default_repository: "registry.local:5000/tap/tbs"
+  kp_default_repository_username: "admin"
+  kp_default_repository_password: "admin"
+  tanzunet_username: "$tanzunet_user"
+  tanzunet_password: "$tanzunet_password"
+  descriptor_name: "$tbs_descriptor"
+  enable_automatic_dependency_updates: true
+supply_chain: basic
+
+ootb_supply_chain_basic:
+  registry:
+    server: "registry.local:5000"
+    repository: "tap"
+  gitops:
+    ssh_secret: ""
+
+cnrs:
+  provider: local
+  domain_name: 127.0.0.1.nip.io
+  domain_template: "{{.Name}}-{{.Namespace}}.{{.Domain}}"
+EOF
+  fi
   echo "(2/8) Creating the TCE kind based unmanaged cluster"
   tanzu uc create -f tce-tap.yaml
   kubectl create ns tap-install
