@@ -78,7 +78,7 @@ Options:
 
 [Optional Flags - For Create Action]
   --tap-profile : TAP Installation Profile. (Default full)
-  --tap-version : Version of TAP. - (Default 1.1.0)
+  --tap-version : Version of TAP. - (Default 1.1.1)
   --tbs-descriptor
   --tce-package-repo-url : URL For Tanzu Community Edition Package Repository. - (Default: projects.registry.vmware.com/tce/main:0.12.0)
   --kyverno-package-repo-url : URL For Kyverno Package Repository. - (Default: ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.3)
@@ -111,7 +111,7 @@ if ! [[ $action ]]; then
   exit 1
 fi
 if ! [[ $tap_version ]]; then
-  tap_version="1.1.0"
+  tap_version="1.1.1"
 fi
 
 NC='\033[0m'           # Text Reset
