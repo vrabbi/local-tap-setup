@@ -1,14 +1,14 @@
 # Local TAP Installation
-This repo contains a script for managing a local TAP installation on a TCE Unmanaged Cluster.
-
+This repo contains a script for managing a local TAP installation on a TCE Unmanaged Cluster.  
+This script can manage TAP 1.1.0 and above.
+  
 # Pre-Reqs
 
 ## Instalations
 In order to use this script you must have the following installed on your system:
-1. Docker
-2. Kubectl
-3. jq
-4. TCE v0.12.rc2 or later
+1. Docker - must be installed in advance
+2. Kubectl - can be installed using the script
+4. TCE v0.12.0 - can be installed using the script
   
 ## Resources
 You also need the following minimum resources:
@@ -28,11 +28,20 @@ You also need the following minimum resources:
   
 # Whats Included
 This script has 5 functions
+1. Install prereqs if they are missing or outdated
 1. Create a local TAP installation
 2. Delete a local TAP installation
 3. Check the status of the local TAP installation
 4. Stop a local TAP installation
 5. Start a local TAP installation you stopped previously
+  
+## Prepare function
+This will do the following:
+1. Check if Tanzu CLI is installed
+2. Validate Tanzu CLI is of the correct version
+3. Upgrade or install Tanzu CLI if needed
+4. Check that Kubectl is installed
+5. Install Kubectl if needed
   
 ## Create function
 This will do the following:
@@ -40,7 +49,7 @@ This will do the following:
 2. Deploy the Cluster
 3. Deploy a local docker registry
 4. Deploy the secretgen controller in the cluster
-5. Install TAP with the full profile except for learning center
+5. Install TAP with the full profile except for learning center or with the iterate profile
 6. Install Kyverno
 7. Create a Kyverno Cluster Policy that will prepare every new namespace automatically for TAP workloads
 8. Wait for all packages to reconcile and validate the platform is installed successfully
@@ -75,4 +84,31 @@ chmod +x local-tap.sh
 2. Run the script with the --help flag for the needed flags
 ```bash
 ./local-tap.sh --help
+```
+
+# Example Commands
+```bash
+# Prepare your machine
+./local-tap.sh --action prepare
+
+# Create a cluster with the default settings
+./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO
+
+# Create a cluster with the iterate profile - Saves resources but no UI or security tooling
+./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-profile iterate
+
+# Create a cluster with a specific TAP version
+./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-version $TAP_VERSION
+
+# Get the status of your environment
+./local-tap.sh --action status
+
+# Shutdown your environment
+./local-tap.sh --action stop
+
+# Start up your environment
+./local-tap.sh --action start
+
+# Delete your environment
+./local-tap.sh --action delete
 ```
