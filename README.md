@@ -19,6 +19,7 @@ You also need the following minimum resources:
 ## Preperation
 1. You must relocate the TAP Package Repository to a registry of your choosing
 * You can do this following the [Official TAP Documentation](https://docs.vmware.com/en/Tanzu-Application-Platform/1.1/tap/GUID-install.html#relocate-images-to-a-registry-0)
+* You can use the relocate-tap-repo.sh script in this repo to do this as well
 * The repo you relocate to should be a public repo that doesnt require authentication
   
 2. Get a cup of coffee as the installation will take a few minutes  
