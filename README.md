@@ -51,10 +51,12 @@ This will do the following:
 3. Deploy a local docker registry
 4. Deploy the secretgen controller in the cluster
 5. Install TAP with the full profile except for learning center or with the iterate profile
-6. Install Kyverno
-7. Create a Kyverno Cluster Policy that will prepare every new namespace automatically for TAP workloads
-8. Wait for all packages to reconcile and validate the platform is installed successfully
-9. Expose TAP GUI and all ingress/httpproxy objects using the suffix 127.0.0.1.nip.io alllowing local access from your browser
+6. Install any of the 3 OOTB Supply chains
+7. Install Kyverno
+8. Create a Kyverno Cluster Policy that will prepare every new namespace automatically for TAP workloads
+9. Wait for all packages to reconcile and validate the platform is installed successfully
+10. Prepare the default namespace for workload creation including scanning CRDs and an example tekton pipeline.
+11. Expose TAP GUI and all ingress/httpproxy objects using the suffix 127.0.0.1.nip.io alllowing local access from your browser
   
 ## Delete function
 This will do the following:
@@ -97,6 +99,9 @@ chmod +x local-tap.sh
 
 # Create a cluster with the iterate profile - Saves resources but no UI or security tooling
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-profile iterate
+
+# Create a cluster with the testing and scanning supply chain
+./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --supply-chain testing_scanning  
 
 # Create a cluster with a specific TAP version
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-version $TAP_VERSION

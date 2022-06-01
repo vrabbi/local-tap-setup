@@ -60,6 +60,11 @@ while test $# -gt 0; do
       tap_profile=$1
       shift
       ;;
+    --supply-chain)
+      shift
+      supply_chain=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
@@ -78,10 +83,11 @@ Options:
 
 [Optional Flags - For Create Action]
   --tap-profile : TAP Installation Profile. (Default full)
+  --supply-chain : The supply chain to install (Default basic) Options: basic, testing, testing_scanning
   --tap-version : Version of TAP. - (Default 1.1.1)
   --tbs-descriptor
   --tce-package-repo-url : URL For Tanzu Community Edition Package Repository. - (Default: projects.registry.vmware.com/tce/main:0.12.0)
-  --kyverno-package-repo-url : URL For Kyverno Package Repository. - (Default: ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.3)
+  --kyverno-package-repo-url : URL For Kyverno Package Repository. - (Default: ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.5)
   --dockerhub-registry-mirror : URL for Dockerhub Registry Mirror to be configured in containerd on the cluster. - (Default: null)
   --tap-gui-catalog-url : Github URL for the TAP GUI Catalog. - (Default: https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml)
 
@@ -318,7 +324,7 @@ elif [[ $action == "create" ]]; then
     tbs_descriptor="lite"
   fi
   if ! [[ $kyverno_package_repo_url ]]; then
-    kyverno_package_repo_url="ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.3"
+    kyverno_package_repo_url="ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.5"
   fi
   if ! [[ $tce_package_repo_url ]]; then
     tce_package_repo_url="projects.registry.vmware.com/tce/main:0.12.0"
@@ -326,10 +332,13 @@ elif [[ $action == "create" ]]; then
   if ! [[ $tap_gui_catalog_url ]]; then
     tap_gui_catalog_url="https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml"
   fi
+  if ! [[ $supply_chain ]]; then
+    supply_chain="basic"
+  fi
 
   mkdir -p tce-tap-files
   cd tce-tap-files
-  echo "(1/8) Generating Config files"
+  echo "(1/9) Generating Config files"
   cat << EOF > tce-tap.yaml
 ClusterName: tce-tap
 Cni: calico
@@ -346,7 +355,7 @@ InstallPackages:
 - name: secretgen-controller
   version: 0.7.1
 - name: kyverno
-  version: 2.3.3
+  version: 2.3.5
 - name: tap
   version: $tap_version
   config: tap-values.yaml
@@ -363,14 +372,6 @@ buildservice:
   tanzunet_password: "$tanzunet_password"
   descriptor_name: "$tbs_descriptor"
   enable_automatic_dependency_updates: true
-supply_chain: basic
-
-ootb_supply_chain_basic:
-  registry:
-    server: "registry.local:5000"
-    repository: "tap"
-  gitops:
-    ssh_secret: ""
 
 tap_gui:
   service_type: ClusterIP
@@ -430,13 +431,52 @@ cnrs:
   domain_template: "{{.Name}}-{{.Namespace}}.{{.Domain}}"
 EOF
   fi
-  echo "(2/8) Creating the TCE kind based unmanaged cluster"
+  if [[ $supply_chain == "basic" ]]; then
+    cat << EOF >> tap-values.yaml
+supply_chain: basic
+
+ootb_supply_chain_basic:
+  registry:
+    server: "registry.local:5000"
+    repository: "tap"
+  gitops:
+    ssh_secret: ""
+EOF
+  elif [[ $supply_chain == "testing" ]]; then
+    cat << EOF >> tap-values.yaml
+supply_chain: testing
+
+ootb_supply_chain_testing:
+  registry:
+    server: "registry.local:5000"
+    repository: "tap"
+  gitops:
+    ssh_secret: ""
+EOF
+  elif [[ $supply_chain == "testing_scanning" ]]; then
+    cat << EOF >> tap-values.yaml
+supply_chain: testing_scanning
+
+ootb_supply_chain_testing_scanning:
+  registry:
+    server: "registry.local:5000"
+    repository: "tap"
+  gitops:
+    ssh_secret: ""
+grype:
+  targetImagePullSecret: "tap-registry"
+EOF
+  else
+    echo "Error: Invalid Supply Chain name provided"
+    exit 1
+  fi
+  echo "(2/9) Creating the TCE kind based unmanaged cluster"
   tanzu uc create -f tce-tap.yaml
   kubectl create ns tap-install
-  echo "(3/8) Creating a local docker registry to be used for TAP workloads and TBS images"
+  echo "(3/9) Creating a local docker registry to be used for TAP workloads and TBS images"
   docker run -d --restart=always -p "5000:5000" --name "registry.local" registry:2
   docker network connect kind registry.local
-  echo "(4/8) Configuring TCE cluster to trust the insecure local registry"
+  echo "(4/9) Configuring TCE cluster to trust the insecure local registry"
   docker cp tce-tap-control-plane:/etc/containerd/config.toml ./config.toml
   if [[ $dockerhub_registry_mirror ]]; then
     cat << EOF >> config.toml
@@ -463,7 +503,7 @@ EOF
   fi
   docker cp config.toml tce-tap-control-plane:/etc/containerd/config.toml
   docker exec tce-tap-control-plane service containerd restart
-  echo "(5/8) Setting up Access to the local registry from your docker daemon..."
+  echo "(5/9) Setting up Access to the local registry from your docker daemon..."
   ipAddr=`docker inspect -f '{{.NetworkSettings.IPAddress}}' registry.local | tr '\n' ' '`
   hostName="registry.local"
   matchesInHosts=`grep -n registry.local /etc/hosts | cut -f1 -d:`
@@ -491,7 +531,7 @@ data:
     host: "localhost:5000"
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
-  echo "(6/8) Waiting for SecretGen Controller installation to complete"
+  echo "(6/9) Waiting for SecretGen Controller installation to complete"
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 data:
@@ -513,9 +553,12 @@ spec:
   toNamespaces:
   - '*'
 EOF
-  echo "(7/8) Waiting for TAP installation to complete"
+  echo "(7/9) Waiting for TAP installation to complete"
   kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/tap --timeout=15m
-  echo "(8/8) Patching Kapp Controller to support TAP generated App CRs"
+  echo "(8/9) Trigger Kyverno generate policy on the default namespace"
+  kubectl label namespace default a=b
+  kubectl label namespace default a-
+  echo "(9/9) Patching Kapp Controller to support TAP generated App CRs"
   cat << EOF > kapp-controller-dns-patch.yaml
 spec:
   template:
