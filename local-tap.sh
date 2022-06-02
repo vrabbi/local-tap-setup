@@ -65,6 +65,11 @@ while test $# -gt 0; do
       supply_chain=$1
       shift
       ;;
+    --enable-techdocs)
+      shift
+      enable_techdocs=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
@@ -90,6 +95,7 @@ Options:
   --kyverno-package-repo-url : URL For Kyverno Package Repository. - (Default: ghcr.io/vrabbi/kyverno-tap-repo.terasky.oss:0.1.5)
   --dockerhub-registry-mirror : URL for Dockerhub Registry Mirror to be configured in containerd on the cluster. - (Default: null)
   --tap-gui-catalog-url : Github URL for the TAP GUI Catalog. - (Default: https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml)
+  --enable-techdocs : (yes or no) Adds a patch to the TAP GUI deployment to allow for auto rendering of TechDocs using a containerized Docker Socket (Default: no)
 
 EOF
       exit 1
@@ -229,6 +235,8 @@ elif [[ $action == "status" ]]; then
   if [[ `tanzu uc list -o json | jq -r '.[] | select(.name=="tce-tap") | .status'` == "Running" ]]; then
     echo -e "${B}Package Statuses:${NC}"
     tap_profile=`kubectl get secret -n tkg-system tap-config -o json | jq '.data["values.yml"]' -r | base64 -d | head -n 1 | cut -d ":" -f2`
+    supply_chain_suffix=`kubectl get secret -n tkg-system tap-config -o json | jq -r '.data."values.yml"' | base64 -d | grep "supply_chain: " | sed 's/^supply_chain: //' | sed 's/_/-/g'`
+    supply_chain="ootb-supply-chain-$supply_chain_suffix"
     print_package_status "TAP Meta Package" tkg-system tap
     print_package_status "Secretgen Controller" tkg-system secretgen-controller
     print_package_status "kyverno" tkg-system kyverno
@@ -244,8 +252,8 @@ elif [[ $action == "status" ]]; then
     print_package_status "Developer Conventions" tap-install developer-conventions
     print_package_status "FluxCD Source Controller" tap-install fluxcd-source-controller
     print_package_status "Image Policy Webhook" tap-install image-policy-webhook
-    print_package_status "OOTB Delivery - Basic" tap-install ootb-delivery-basic
-    print_package_status "OOTB Supply Chain - Basic" tap-install ootb-supply-chain-basic
+    print_package_status "OOTB Delivery" tap-install ootb-delivery-basic
+    print_package_status "OOTB Supply Chain" tap-install $supply_chain
     print_package_status "OOTB Templates" tap-install ootb-templates
     print_package_status "Service Bindings" tap-install service-bindings
     print_package_status "Services Toolkit" tap-install services-toolkit
@@ -274,8 +282,8 @@ elif [[ $action == "delete" ]]; then
   echo "(1/2) Delete TCE TAP Cluster"
   tanzu uc delete tce-tap
   echo "(2/2) Delete Local Registry"
-  docker stop registry.local
-  docker rm registry.local
+  docker stop registry.local | sed 's/^/       /g'
+  docker rm registry.local | sed 's/^/       /g'
   echo "Your environment has been deleted."
   end=`date +%s`
   runtime=$((end-start))
@@ -286,9 +294,9 @@ elif [[ $action == "delete" ]]; then
   echo "Script Runtime: $hours:$minutes:$seconds (hh:mm:ss)"
 elif [[ $action == "stop" ]]; then
   echo "(1/2) Stop TCE TAP Cluster"
-  tanzu uc stop tce-tap
+  tanzu uc stop tce-tap | sed 's/^/       /g'
   echo "(2/2) Stop Local Registry"
-  docker stop registry.local
+  docker stop registry.local | sed 's/^/       /g'
   echo "Your environment has been stopped."
   end=`date +%s`
   runtime=$((end-start))
@@ -299,9 +307,9 @@ elif [[ $action == "stop" ]]; then
   echo "Script Runtime: $hours:$minutes:$seconds (hh:mm:ss)"
 elif [[ $action == "start" ]]; then
   echo "(1/2) Start Local Registry"
-  docker start registry.local
+  docker start registry.local | sed 's/^/       /g'
   echo "(2/2) Start TCE TAP Cluster"
-  tanzu uc start tce-tap
+  tanzu uc start tce-tap | sed 's/^/       /g'
   echo "Your environment has been started. please give it a few minutes to come back up fully and reconcile all of the packages."
   end=`date +%s`
   runtime=$((end-start))
@@ -315,6 +323,13 @@ elif [[ $action == "create" ]]; then
   if ! [[ $tanzunet_user || $tanzunet_password || $tap_package_repo_url ]]; then
     echo "Mandatory flags were not passed. use --help for usage information"
     exit 1
+  fi
+  if ! [[ $enable_techdocs ]]; then
+    task_count=9
+  elif [[ $enable_techdocs == "yes" ]]; then
+    task_count=10
+  else
+    task_count=9
   fi
   # Default Values if not overridden via input flags
   if ! [[ $tap_profile ]]; then
@@ -336,9 +351,9 @@ elif [[ $action == "create" ]]; then
     supply_chain="basic"
   fi
 
-  mkdir -p tce-tap-files
-  cd tce-tap-files
-  echo "(1/9) Generating Config files"
+  mkdir -p tce-tap-files | sed 's/^/       /g'
+  cd tce-tap-files | sed 's/^/       /g'
+  echo "(1/$task_count) Generating Config files"
   cat << EOF > tce-tap.yaml
 ClusterName: tce-tap
 Cni: calico
@@ -470,14 +485,14 @@ EOF
     echo "Error: Invalid Supply Chain name provided"
     exit 1
   fi
-  echo "(2/9) Creating the TCE kind based unmanaged cluster"
+  echo "(2/$task_count) Creating the TCE kind based unmanaged cluster"
   tanzu uc create -f tce-tap.yaml
-  kubectl create ns tap-install
-  echo "(3/9) Creating a local docker registry to be used for TAP workloads and TBS images"
-  docker run -d --restart=always -p "5000:5000" --name "registry.local" registry:2
-  docker network connect kind registry.local
-  echo "(4/9) Configuring TCE cluster to trust the insecure local registry"
-  docker cp tce-tap-control-plane:/etc/containerd/config.toml ./config.toml
+  kubectl create ns tap-install | sed 's/^/       /g'
+  echo "(3/$task_count) Creating a local docker registry to be used for TAP workloads and TBS images"
+  docker run -d --restart=always -p "5000:5000" --name "registry.local" registry:2 | sed 's/^/       /g'
+  docker network connect kind registry.local | sed 's/^/       /g'
+  echo "(4/$task_count) Configuring TCE cluster to trust the insecure local registry"
+  docker cp tce-tap-control-plane:/etc/containerd/config.toml ./config.toml | sed 's/^/       /g'
   if [[ $dockerhub_registry_mirror ]]; then
     cat << EOF >> config.toml
 [plugins."io.containerd.grpc.v1.cri".registry]
@@ -501,26 +516,26 @@ EOF
       insecure_skip_verify = true
 EOF
   fi
-  docker cp config.toml tce-tap-control-plane:/etc/containerd/config.toml
-  docker exec tce-tap-control-plane service containerd restart
-  echo "(5/9) Setting up Access to the local registry from your docker daemon..."
+  docker cp config.toml tce-tap-control-plane:/etc/containerd/config.toml | sed 's/^/       /g'
+  docker exec tce-tap-control-plane service containerd restart | sed 's/^/       /g'
+  echo "(5/$task_count) Setting up Access to the local registry from your docker daemon..."
   ipAddr=`docker inspect -f '{{.NetworkSettings.IPAddress}}' registry.local | tr '\n' ' '`
   hostName="registry.local"
   matchesInHosts=`grep -n registry.local /etc/hosts | cut -f1 -d:`
   hostEntry="$ipAddr $hostName"
   if [ ! -z "$matchesInHosts" ]
   then
-    echo "Updating existing hosts entry."
+    echo "Updating existing hosts entry." | sed 's/^/       /g'
     # iterate over the line numbers on which matches were found
     while read -r line_number; do
       # replace the text of each line with the desired host entry
       sudo sed -i "${line_number}s/.*/${hostEntry} /" /etc/hosts
     done <<< "$matchesInHosts"
   else
-    echo "Adding new hosts entry."
+    echo "Adding new hosts entry." | sed 's/^/       /g'
     echo "$hostEntry" | sudo tee -a /etc/hosts > /dev/null
   fi
-  cat <<EOF | kubectl apply -f -
+  cat << EOF > registry-cm.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -531,8 +546,10 @@ data:
     host: "localhost:5000"
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
-  echo "(6/9) Waiting for SecretGen Controller installation to complete"
-  cat <<EOF | kubectl apply -f -
+  kubectl apply -f registry-cm.yaml | sed 's/^/       /g'
+  rm -f registry-cm.yaml
+  echo "(6/$task_count) Waiting for SecretGen Controller installation to complete"
+  cat << EOF > reg-creds-secret.yaml
 apiVersion: v1
 data:
   .dockerconfigjson: eyJhdXRocyI6eyJyZWdpc3RyeS5sb2NhbDo1MDAwIjp7InVzZXJuYW1lIjoiYWRtaW4iLCJwYXNzd29yZCI6ImFkbWluIn19fQ==
@@ -542,8 +559,10 @@ metadata:
   namespace: tap-install
 type: kubernetes.io/dockerconfigjson
 EOF
-  kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/secretgen-controller --timeout=10m
-  cat <<EOF | kubectl apply -f -
+  kubectl apply -f reg-creds-secret.yaml | sed 's/^/       /g'
+  rm -f reg-creds-secret.yaml
+  kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/secretgen-controller --timeout=10m | sed 's/^/       /g'
+  cat << EOF > reg-creds-secret-export.yaml
 apiVersion: secretgen.carvel.dev/v1alpha1
 kind: SecretExport
 metadata:
@@ -553,21 +572,68 @@ spec:
   toNamespaces:
   - '*'
 EOF
-  echo "(7/9) Waiting for TAP installation to complete"
-  kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/tap --timeout=15m
-  echo "(8/9) Trigger Kyverno generate policy on the default namespace"
-  kubectl label namespace default a=b
-  kubectl label namespace default a-
-  echo "(9/9) Patching Kapp Controller to support TAP generated App CRs"
+  kubectl apply -f reg-creds-secret-export.yaml | sed 's/^/       /g'
+  rm -f reg-creds-secret-export.yaml
+  echo "(7/$task_count) Waiting for TAP installation to complete"
+  kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/tap --timeout=15m | sed 's/^/       /g'
+  echo "(8/$task_count) Trigger Kyverno generate policy on the default namespace"
+  kubectl label namespace default a=b | sed 's/^/       /g'
+  kubectl label namespace default a- | sed 's/^/       /g'
+  echo "(9/$task_count) Patching Kapp Controller to support TAP generated App CRs"
   cat << EOF > kapp-controller-dns-patch.yaml
 spec:
   template:
     spec:
       dnsPolicy: "ClusterFirstWithHostNet"
 EOF
-  kubectl patch deployment -n tkg-system kapp-controller --patch-file kapp-controller-dns-patch.yaml
+  kubectl patch deployment -n tkg-system kapp-controller --patch-file kapp-controller-dns-patch.yaml | sed 's/^/       /g'
   RS_NAME=`kubectl get replicasets.apps -n tkg-system -l app=kapp-controller --sort-by=.metadata.creationTimestamp --no-headers -o json | jq -r .items[0].metadata.name`
-  kubectl delete replicaset -n tkg-system $RS_NAME
+  kubectl delete replicaset -n tkg-system $RS_NAME | sed 's/^/       /g'
+  if [[ $enable_techdocs == "yes" ]]; then
+    echo "(10/$task_count) Enabling Techdocs via Overlay Mechanism"
+    kubectl patch pkgi tap -n tkg-system -p '{"spec":{"paused":true}}' --type=merge | sed 's/^/       /g'
+    kubectl patch pkgi tap-gui -n tap-install -p '{"spec":{"paused":true}}' --type=merge | sed 's/^/       /g'
+    cat << EOF > tap-gui-dind-patch.yaml
+spec:
+  template:
+    spec:
+      containers:
+      - command:
+        - dockerd
+        - --host
+        - tcp://127.0.0.1:2375
+        image: docker:dind-rootless
+        imagePullPolicy: IfNotPresent
+        name: dind-daemon
+        resources: {}
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /output
+          name: output
+      - name: backstage
+        env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /output
+          name: output
+      volumes:
+      - emptyDir: {}
+        name: tmp
+      - emptyDir: {}
+        name: output
+EOF
+    kubectl patch deploy server -n tap-gui --patch-file tap-gui-dind-patch.yaml | sed 's/^/       /g'
+    kubectl rollout status deployment server -n tap-gui | sed 's/^/       /g'
+  fi
   echo "Your local TAP environment is ready!"
   end=`date +%s`
   runtime=$((end-start))

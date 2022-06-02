@@ -57,6 +57,7 @@ This will do the following:
 9. Wait for all packages to reconcile and validate the platform is installed successfully
 10. Prepare the default namespace for workload creation including scanning CRDs and an example tekton pipeline.
 11. Expose TAP GUI and all ingress/httpproxy objects using the suffix 127.0.0.1.nip.io alllowing local access from your browser
+12. Optionally enable Local Techdocs rendering using an overlay to add a containerized docker socket to the TAP GUI deployment
   
 ## Delete function
 This will do the following:
@@ -102,6 +103,9 @@ chmod +x local-tap.sh
 
 # Create a cluster with the testing and scanning supply chain
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --supply-chain testing_scanning  
+
+# Create a cluster with Techdocs enabled in TAP GUI
+./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --enable-techdocs yes
 
 # Create a cluster with a specific TAP version
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-version $TAP_VERSION
