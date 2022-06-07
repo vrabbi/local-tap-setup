@@ -70,6 +70,21 @@ while test $# -gt 0; do
       enable_techdocs=$1
       shift
       ;;
+    --techdocs-container-image)
+      shift
+      techdocs_container_image=$1
+      shift
+      ;;
+    --techdocs-dind-image)
+      shift
+      techdocs_dind_image=$1
+      shift
+      ;;
+    --ca-file-path)
+      shift
+      ca_file_path=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
@@ -96,6 +111,9 @@ Options:
   --dockerhub-registry-mirror : URL for Dockerhub Registry Mirror to be configured in containerd on the cluster. - (Default: null)
   --tap-gui-catalog-url : Github URL for the TAP GUI Catalog. - (Default: https://github.com/vrabbi/tap-gui-beta-3/blob/master/yelb-catalog/catalog-info.yaml)
   --enable-techdocs : (yes or no) Adds a patch to the TAP GUI deployment to allow for auto rendering of TechDocs using a containerized Docker Socket (Default: no)
+  --techdocs-container-image : Image URI for Techdocs rendering (Default: ghcr.io/vrabbi/techdocs:v1.0.3)
+  --techdocs-dind-image : Image URI for DinD rootless image (Default: docker:dind-rootless
+  --ca-file-path : The Full path to the file containing your CA data in PEM format you want to platform to trust
 
 EOF
       exit 1
@@ -271,6 +289,8 @@ elif [[ $action == "status" ]]; then
       print_package_status "TAP GUI" tap-install tap-gui
     fi
   fi
+  echo -e "${B}Images in the Local Registry${NC}"
+  curl http://localhost:5000/v2/_catalog --silent | jq -r .repositories[] | sed 's/^/    /'
   end=`date +%s`
   runtime=$((end-start))
   hours=$((runtime / 3600))
@@ -324,12 +344,14 @@ elif [[ $action == "create" ]]; then
     echo "Mandatory flags were not passed. use --help for usage information"
     exit 1
   fi
-  if ! [[ $enable_techdocs ]]; then
-    task_count=9
-  elif [[ $enable_techdocs == "yes" ]]; then
-    task_count=10
-  else
-    task_count=9
+  task_count=9
+  if [[ $enable_techdocs == "yes" ]]; then
+    ((task_count++))
+  fi
+  if [[ -n "$ca_file_path" ]]; then
+    ((task_count++)) 
+    ((task_count++))
+    ((task_count++))
   fi
   # Default Values if not overridden via input flags
   if ! [[ $tap_profile ]]; then
@@ -350,11 +372,29 @@ elif [[ $action == "create" ]]; then
   if ! [[ $supply_chain ]]; then
     supply_chain="basic"
   fi
-
+  if ! [[ $techdocs_container_image ]]; then
+    techdocs_container_image="ghcr.io/vrabbi/techdocs:v1.0.3"
+  fi
+  if ! [[ $techdocs_dind_image ]]; then
+    techdocs_dind_image="docker:dind-rootless"
+  fi
+  task=1
   mkdir -p tce-tap-files | sed 's/^/       /g'
   cd tce-tap-files | sed 's/^/       /g'
-  echo "(1/$task_count) Generating Config files"
-  cat << EOF > tce-tap.yaml
+  echo "($task/$task_count) Generating Config files"
+  ((task++))
+  if [[ $ca_file_path ]]; then
+    cat << EOF > tce-tap.yaml
+ClusterName: tce-tap
+Cni: calico
+PortsToForward:
+  - HostPort: 80
+    ContainerPort: 80
+  - HostPort: 443
+    ContainerPort: 443
+EOF
+  else
+    cat << EOF > tce-tap.yaml
 ClusterName: tce-tap
 Cni: calico
 AdditionalPackageRepos:
@@ -375,6 +415,7 @@ InstallPackages:
   version: $tap_version
   config: tap-values.yaml
 EOF
+  fi
   if [[ $tap_profile == "full" ]]; then
     cat << EOF > tap-values.yaml
 profile: full
@@ -485,23 +526,66 @@ EOF
     echo "Error: Invalid Supply Chain name provided"
     exit 1
   fi
-  echo "(2/$task_count) Creating the TCE kind based unmanaged cluster"
+  if [[ -n $ca_file_path ]]; then
+    sed 's/^/    /g' $ca_file_path > indented-ca-file.crt
+    cat << EOF >> tap-values.yaml
+shared:
+  ca_cert_data: |
+EOF
+    cat indented-ca-file.crt >> tap-values.yaml
+    cat << EOF >> tap-values.yaml
+convention_controller:
+  ca_cert_data: |
+EOF
+    cat indented-ca-file.crt >> tap-values.yaml
+  fi
+  echo "($task/$task_count) Creating the TCE kind based unmanaged cluster"
+  ((task++))
   tanzu uc create -f tce-tap.yaml
+  if [[ $ca_file_path ]]; then
+    echo "($task/$task_count) Configuring Kapp Controller to Trust the provided CA"
+    ((task++))
+    tap_repo_name=`echo $tap_package_repo_url | sed 's|/|-|g' | sed 's|:|-|g'`
+    kyverno_repo_name=`echo $kyverno_package_repo_url | sed 's|/|-|g' | sed 's|:|-|g'`
+    cat <<EOF > kapp-controller-config-ca-overlay.yaml
+data:
+  caCerts: |
+EOF
+    cat indented-ca-file.crt >> kapp-controller-config-ca-overlay.yaml
+    rm -f indented-ca-file.crt
+    kubectl patch cm -n tkg-system kapp-controller-config --patch-file kapp-controller-config-ca-overlay.yaml | sed 's/^/       /g'
+    RS_NAME=`kubectl get replicasets.apps -n tkg-system -l app=kapp-controller --sort-by=.metadata.creationTimestamp --no-headers -o json | jq -r .items[0].metadata.name`
+    kubectl delete replicaset -n tkg-system $RS_NAME | sed 's/^/       /g'
+    echo "($task/$task_count) Installing Package Repositories and Packages for TAP"
+    ((task++))
+    tanzu package repository add $tap_repo_name -n tanzu-package-repo-global --url $tap_package_repo_url
+    tanzu package repository add $kyverno_repo_name -n tanzu-package-repo-global --url $kyverno_package_repo_url
+    tanzu package install -n tkg-system secretgen-controller -p secretgen-controller.terasky.oss -v 0.7.1 --wait=false
+    tanzu package install -n tkg-system kyverno -p kyverno.terasky.oss -v 2.3.5 --wait=false
+    tanzu package install -n tkg-system tap -p tap.tanzu.vmware.com -v $tap_version --wait=false -f tap-values.yaml
+  fi
   kubectl create ns tap-install | sed 's/^/       /g'
-  echo "(3/$task_count) Creating a local docker registry to be used for TAP workloads and TBS images"
+  echo "($task/$task_count) Creating a local docker registry to be used for TAP workloads and TBS images"
+  ((task++))
   docker run -d --restart=always -p "5000:5000" --name "registry.local" registry:2 | sed 's/^/       /g'
   docker network connect kind registry.local | sed 's/^/       /g'
-  echo "(4/$task_count) Configuring TCE cluster to trust the insecure local registry"
+  echo "($task/$task_count) Configuring TCE cluster to trust the insecure local registry"
+  ((task++))
   docker cp tce-tap-control-plane:/etc/containerd/config.toml ./config.toml | sed 's/^/       /g'
+  tap_registry_fqdn=`echo $tap_package_repo_url | sed 's|/.*||g'`
   if [[ $dockerhub_registry_mirror ]]; then
     cat << EOF >> config.toml
 [plugins."io.containerd.grpc.v1.cri".registry]
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
       endpoint = ["$dockerhub_registry_mirror"]
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."$tap_registry_fqdn"]
+      endpoint = ["https://$tap_registry_fqdn"]
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.local:5000"]
       endpoint = ["http://registry.local:5000"]
   [plugins."io.containerd.grpc.v1.cri".registry.configs]
+    [plugins."io.containerd.grpc.v1.cri".registry.configs."$tap_registry_fqdn".tls]
+      insecure_skip_verify = true
     [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.local:5000".tls]
       insecure_skip_verify = true
 EOF
@@ -509,16 +593,21 @@ EOF
     cat << EOF >> config.toml
 [plugins."io.containerd.grpc.v1.cri".registry]
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."$tap_registry_fqdn"]
+      endpoint = ["https://$tap_registry_fqdn"]
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.local:5000"]
       endpoint = ["http://registry.local:5000"]
   [plugins."io.containerd.grpc.v1.cri".registry.configs]
+    [plugins."io.containerd.grpc.v1.cri".registry.configs."$tap_registry_fqdn".tls]
+      insecure_skip_verify = true
     [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.local:5000".tls]
       insecure_skip_verify = true
 EOF
   fi
   docker cp config.toml tce-tap-control-plane:/etc/containerd/config.toml | sed 's/^/       /g'
   docker exec tce-tap-control-plane service containerd restart | sed 's/^/       /g'
-  echo "(5/$task_count) Setting up Access to the local registry from your docker daemon..."
+  echo "($task/$task_count) Setting up Access to the local registry from your docker daemon..."
+  ((task++))
   ipAddr=`docker inspect -f '{{.NetworkSettings.IPAddress}}' registry.local | tr '\n' ' '`
   hostName="registry.local"
   matchesInHosts=`grep -n registry.local /etc/hosts | cut -f1 -d:`
@@ -548,7 +637,8 @@ data:
 EOF
   kubectl apply -f registry-cm.yaml | sed 's/^/       /g'
   rm -f registry-cm.yaml
-  echo "(6/$task_count) Waiting for SecretGen Controller installation to complete"
+  echo "($task/$task_count) Waiting for SecretGen Controller installation to complete"
+  ((task++))
   cat << EOF > reg-creds-secret.yaml
 apiVersion: v1
 data:
@@ -574,12 +664,15 @@ spec:
 EOF
   kubectl apply -f reg-creds-secret-export.yaml | sed 's/^/       /g'
   rm -f reg-creds-secret-export.yaml
-  echo "(7/$task_count) Waiting for TAP installation to complete"
+  echo "($task/$task_count) Waiting for TAP installation to complete"
+  ((task++))
   kubectl wait -n tkg-system --for=condition=ReconcileSucceeded pkgi/tap --timeout=15m | sed 's/^/       /g'
-  echo "(8/$task_count) Trigger Kyverno generate policy on the default namespace"
+  echo "($task/$task_count) Trigger Kyverno generate policy on the default namespace"
+  ((task++))
   kubectl label namespace default a=b | sed 's/^/       /g'
   kubectl label namespace default a- | sed 's/^/       /g'
-  echo "(9/$task_count) Patching Kapp Controller to support TAP generated App CRs"
+  echo "($task/$task_count) Patching Kapp Controller to support TAP generated App CRs"
+  ((task++))
   cat << EOF > kapp-controller-dns-patch.yaml
 spec:
   template:
@@ -590,7 +683,8 @@ EOF
   RS_NAME=`kubectl get replicasets.apps -n tkg-system -l app=kapp-controller --sort-by=.metadata.creationTimestamp --no-headers -o json | jq -r .items[0].metadata.name`
   kubectl delete replicaset -n tkg-system $RS_NAME | sed 's/^/       /g'
   if [[ $enable_techdocs == "yes" ]]; then
-    echo "(10/$task_count) Enabling Techdocs via Overlay Mechanism"
+    echo "($task/$task_count) Enabling Techdocs via Overlay Mechanism"
+    ((task++))
     kubectl patch pkgi tap -n tkg-system -p '{"spec":{"paused":true}}' --type=merge | sed 's/^/       /g'
     kubectl patch pkgi tap-gui -n tap-install -p '{"spec":{"paused":true}}' --type=merge | sed 's/^/       /g'
     cat << EOF > tap-gui-dind-patch.yaml
@@ -602,7 +696,7 @@ spec:
         - dockerd
         - --host
         - tcp://127.0.0.1:2375
-        image: docker:dind-rootless
+        image: $techdocs_dind_image
         imagePullPolicy: IfNotPresent
         name: dind-daemon
         resources: {}
@@ -631,9 +725,23 @@ spec:
       - emptyDir: {}
         name: output
 EOF
+    kubectl get secret -n tap-gui app-config-ver-1 -o json | jq -r '.data."app-config.yaml"' | base64 -d > tap-gui-secret.yaml | sed 's/^/       /g'
+    cat <<EOF >> tap-gui-secret.yaml
+techdocs:
+  generator:
+    dockerImage: $techdocs_container_image
+EOF
+    CM_CONTENT=`cat tap-gui-secret.yaml | base64 -w 0`
+    cat << EOF >> tap-gui-secret-patch.yaml
+data:
+  app-config.yaml: $CM_CONTENT
+EOF
+    kubectl patch secret -n tap-gui app-config-ver-1 --patch-file tap-gui-secret-patch.yaml | sed 's/^/       /g'
     kubectl patch deploy server -n tap-gui --patch-file tap-gui-dind-patch.yaml | sed 's/^/       /g'
     kubectl rollout status deployment server -n tap-gui | sed 's/^/       /g'
   fi
+  # Move config files to the dedicated folder
+  mv tce-tap.yaml tap-values.yaml tap-gui-secret-patch.yaml tap-gui-dind-patch.yaml kapp-controller-dns-patch.yaml config.toml tap-gui-secret.yaml kapp-controller-config-ca-overlay.yaml tce-tap-files/ 2>/dev/null
   echo "Your local TAP environment is ready!"
   end=`date +%s`
   runtime=$((end-start))
