@@ -58,6 +58,7 @@ This will do the following:
 10. Prepare the default namespace for workload creation including scanning CRDs and an example tekton pipeline.
 11. Expose TAP GUI and all ingress/httpproxy objects using the suffix 127.0.0.1.nip.io alllowing local access from your browser
 12. Optionally enable Local Techdocs rendering using an overlay to add a containerized docker socket to the TAP GUI deployment
+13. Optionally expose TAP GUI and all ingress/httpproxy objects outside of your machine using the suffix \<MACHINE IP\>.nip.io allowing access from your LAN
   
 ## Delete function
 This will do the following:
@@ -106,6 +107,12 @@ chmod +x local-tap.sh
 
 # Create a cluster with Techdocs enabled in TAP GUI
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --enable-techdocs yes
+
+# Create a cluster that trusts a self signed or Corporate CA signed registry for packages and images 
+./local-tap.sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --ca-file-path /path/to/your/ca.crt
+
+# Creare a cluster that is exposed outside of your machine
+./local-tap.sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --enable-remote-access yes --ip-address $YOUR_MACHINES_IP_ADDRESS
 
 # Create a cluster with a specific TAP version
 ./local-tap-sh --action create --tanzunet-user $TANZUNET_USER --tanzunet-password $TANZUNET_PASSWORD --tap-package-repo-url $TAP_REPO --tap-version $TAP_VERSION

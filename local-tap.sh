@@ -85,6 +85,16 @@ while test $# -gt 0; do
       ca_file_path=$1
       shift
       ;;
+    --enable-remote-access)
+      shift
+      enable_remote_access=$1
+      shift
+      ;;
+    --ip-address)
+      shift
+      ip_address=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
@@ -114,6 +124,8 @@ Options:
   --techdocs-container-image : Image URI for Techdocs rendering (Default: ghcr.io/vrabbi/techdocs:v1.0.3)
   --techdocs-dind-image : Image URI for DinD rootless image (Default: docker:dind-rootless
   --ca-file-path : The Full path to the file containing your CA data in PEM format you want to platform to trust
+  --enable-remote-access : (yes or no) This flag allows you to set whether remote access from other machines should be allowed to TAP GUI and other exposed endpoints (Default: no)
+  --ip-address : Required if enabling remote access. This flags value needs to be the IP of your node (eg. 192.168.1.231)
 
 EOF
       exit 1
@@ -344,6 +356,12 @@ elif [[ $action == "create" ]]; then
     echo "Mandatory flags were not passed. use --help for usage information"
     exit 1
   fi
+  if [[ $enable_remote_access == "yes" ]]; then
+    if ! [[ $ip_address ]]; then
+      echo "When enabling remote access, you must provide your machine IP address via the flag --ip-address"
+      exit 1
+    fi
+  fi
   task_count=9
   if [[ $enable_techdocs == "yes" ]]; then
     ((task_count++))
@@ -377,6 +395,9 @@ elif [[ $action == "create" ]]; then
   fi
   if ! [[ $techdocs_dind_image ]]; then
     techdocs_dind_image="docker:dind-rootless"
+  fi
+  if ! [[ $ip_address ]]; then
+    ip_address="127.0.0.1"
   fi
   task=1
   mkdir -p tce-tap-files | sed 's/^/       /g'
@@ -432,22 +453,48 @@ buildservice:
 tap_gui:
   service_type: ClusterIP
   ingressEnabled: "true"
-  ingressDomain: "127.0.0.1.nip.io"
+  ingressDomain: "$ip_address.nip.io"
   app_config:
     app:
-      baseUrl: http://tap-gui.127.0.0.1.nip.io
+      baseUrl: http://tap-gui.$ip_address.nip.io
+      title: Local TAP Environment
+      support:
+        url: https://github.com/vrabbi/local-tap-setup
+        items:
+          - title: Issues
+            icon: github
+            links:
+            - url: https://github.com/vrabbi/local-tap-setup/issues
+              title: Github Issues
+          - title: Blog
+            icon: docs
+            links:
+            - url: https://vrabbi.cloud
+              title: vRabbi's Blog
+          - title: Contact Support
+            icon: email
+            links:
+            - url: https://tanzu.vmware.com/support
+              title: Tanzu Support Page
+          - title: Documentation
+            icon: docs
+            links:
+            - url: https://docs.vmware.com/en/VMware-Tanzu-Application-Platform/index.html
+              title: Tanzu Application Platform Documentation
+    organization:
+      name: Local TAP Environment
     catalog:
       locations:
         - type: url
           target: "$tap_gui_catalog_url"
     backend:
-      baseUrl: http://tap-gui.127.0.0.1.nip.io
+      baseUrl: http://tap-gui.$ip_address.nip.io
       cors:
-        origin: http://tap-gui.127.0.0.1.nip.io
+        origin: http://tap-gui.$ip_address.nip.io
 
 cnrs:
   provider: local
-  domain_name: 127.0.0.1.nip.io
+  domain_name: $ip_address.nip.io
   domain_template: "{{.Name}}-{{.Namespace}}.{{.Domain}}"
 
 excluded_packages:
@@ -483,7 +530,7 @@ ootb_supply_chain_basic:
 
 cnrs:
   provider: local
-  domain_name: 127.0.0.1.nip.io
+  domain_name: $ip_address.nip.io
   domain_template: "{{.Name}}-{{.Namespace}}.{{.Domain}}"
 EOF
   fi
@@ -743,6 +790,43 @@ EOF
   # Move config files to the dedicated folder
   mv tce-tap.yaml tap-values.yaml tap-gui-secret-patch.yaml tap-gui-dind-patch.yaml kapp-controller-dns-patch.yaml config.toml tap-gui-secret.yaml kapp-controller-config-ca-overlay.yaml tce-tap-files/ 2>/dev/null
   echo "Your local TAP environment is ready!"
+  if [[ $tap_profile == "full" ]]; then
+    echo ""
+    echo "You can access TAP GUI at: http://tap-gui.$ip_address.nip.io"
+  fi
+  cat << EOF
+
+Local Registry Info:
+    Login command: docker login localhost:5000
+    Username: user
+    Password: password
+
+    When referencing images within kubernetes, the registry name is registry.local:5000 and not localhost:5000
+EOF
+  if [[ $supply_chain != "basic" ]]; then
+    cat << EOF
+
+Sample App Deployment:
+    Deploy Command: tanzu apps workload create demo01 --git-repo https://github.com/sample-accelerators/tanzu-java-web-app --git-branch main --type web --label app.kubernetes.io/part-of=demo01 --yes --label apps.tanzu.vmware.com/has-tests="true"
+  
+    Command to follow along with the supply chain: tanzu apps workload tail demo01
+   
+    Your deployed app is now accessible at: http://demo01-default.$ip_address.nip.io
+EOF
+  fi
+  if [[ $supply_chain == "basic" ]]; then
+    cat << EOF
+
+Sample App Deployment:
+    Deploy Command: tanzu apps workload create demo01 --git-repo https://github.com/sample-accelerators/tanzu-java-web-app --git-branch main --type web --label app.kubernetes.io/part-of=demo01 --yes
+    
+    Command to follow along with the supply chain: tanzu apps workload tail demo01
+    
+    Your deployed app is now accessible at: http://demo01-default.$ip_address.nip.io
+EOF
+  fi
+  echo ""
+  echo "Happy TAPing!"
   end=`date +%s`
   runtime=$((end-start))
   hours=$((runtime / 3600))

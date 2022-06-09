@@ -1,4 +1,12 @@
 # Whats New
+
+## June 9th 2022
+* Added support for exposing all TAP Endpints (TAP-GUI and Deployed Apps) outside of the local machine by setting the flag --enable-remote-access to yes and providing your machines IP address via the flag --ip-address
+* Added the Local TAP Setup Github Repo, and vRabbi Blog under the support section in TAP GUI
+* Added some simple Branding on the TAP GUI
+* Include instructions for deploying a sample app after the deployment succeeded
+* Included details for connecting and using the local container registry
+
   
 ## June 7th 2022
 * Added Experimental Self Signed Certificate Registry Support via the --ca-file-path flag
