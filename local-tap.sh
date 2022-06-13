@@ -95,6 +95,11 @@ while test $# -gt 0; do
       ip_address=$1
       shift
       ;;
+    --insecure-expose-kube-api)
+      shift
+      insecure_expose_kube_api=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
@@ -126,6 +131,7 @@ Options:
   --ca-file-path : The Full path to the file containing your CA data in PEM format you want to platform to trust
   --enable-remote-access : (yes or no) This flag allows you to set whether remote access from other machines should be allowed to TAP GUI and other exposed endpoints (Default: no)
   --ip-address : Required if enabling remote access. This flags value needs to be the IP of your node (eg. 192.168.1.231)
+  --insecure-expose-kube-api : (yes or no) This flag allows you to set whether the Kubernetes Cluster will be configured to allow access from outside your machine. (Default: no)
 
 EOF
       exit 1
@@ -362,6 +368,12 @@ elif [[ $action == "create" ]]; then
       exit 1
     fi
   fi
+  if [[ $insecure_expose_kube_api == "yes" ]]; then
+    if ! [[ $ip_address ]]; then
+      echo "When exposing the kube API outside of your machine, you must provide your machine IP address via the flag --ip-address"
+      exit 1
+    fi
+  fi
   task_count=9
   if [[ $enable_techdocs == "yes" ]]; then
     ((task_count++))
@@ -435,6 +447,14 @@ InstallPackages:
 - name: tap
   version: $tap_version
   config: tap-values.yaml
+EOF
+  fi
+  if [[ $insecure_expose_kube_api == "yes" ]]; then
+    cat << EOF >> tce-tap.yaml
+ProviderConfiguration:
+  rawKindConfig: |
+    networking:
+      apiServerAddress: $ip_address
 EOF
   fi
   if [[ $tap_profile == "full" ]]; then

@@ -1,5 +1,8 @@
 # Whats New
 
+## June 13th 2022
+* Added support for exposing the cluster outside of your local machine using the Machines IP address as the Control Plane Endpoint by setting the flag --insecure-expose-kube-api to yes, and providing your machines IP address via the flag --ip-address
+  
 ## June 9th 2022
 * Added support for exposing all TAP Endpints (TAP-GUI and Deployed Apps) outside of the local machine by setting the flag --enable-remote-access to yes and providing your machines IP address via the flag --ip-address
 * Added the Local TAP Setup Github Repo, and vRabbi Blog under the support section in TAP GUI
