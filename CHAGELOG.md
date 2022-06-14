@@ -1,5 +1,13 @@
 # Whats New
 
+## June 14th 2022
+* Added support for setting the cluster name vi a new flag --cluster-name. Still defaults to tce-tap but this allows for changing the name if needed. currently you can still only run 1 instance at a time on a machine.
+* Added support for installing from a local registry using a new flag --install-from-local-registry
+* Added the logic from the relocate images script to a new action in the main script called relocate-images. The relocate script will be removed in the near future from the repo.
+* Added logic to the relocate functionality to support pushing images to a local registry via the new --target flag.
+* Added printing of all images in the local registry including tags to the status action
+* Added an option to keep the local docker registry when deleting the environment via a new flag --keep-local-registry
+  
 ## June 13th 2022
 * Added support for exposing the cluster outside of your local machine using the Machines IP address as the Control Plane Endpoint by setting the flag --insecure-expose-kube-api to yes, and providing your machines IP address via the flag --ip-address
   
