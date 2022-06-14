@@ -1,6 +1,7 @@
 # Whats New
 
 ## June 14th 2022
+* Added binary as a release artifact that includes bash completion
 * Added support for setting the cluster name vi a new flag --cluster-name. Still defaults to tce-tap but this allows for changing the name if needed. currently you can still only run 1 instance at a time on a machine.
 * Added support for installing from a local registry using a new flag --install-from-local-registry
 * Added the logic from the relocate images script to a new action in the main script called relocate-images. The relocate script will be removed in the near future from the repo.

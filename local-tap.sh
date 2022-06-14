@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 if [[ $# == 0 ]]; then
   echo "No Flags were passed. Run with --help flag to get usage information"
   exit 1
@@ -120,10 +120,18 @@ while test $# -gt 0; do
       cluster_name=$1
       shift
       ;;
+    completion)
+      shift
+      shell_type=$1
+      shift
+      ;;
     --help)
       cat << EOF
 Usage: local-tap.sh [OPTIONS]
 Options:
+
+[Sub Commands]
+  completion : generate shell completion script. currently only available for bash.
 
 [Global Manadatory Flags]
   --action : What action to take - create,stop,start,status,delete,prepare,relocate-images
@@ -184,7 +192,30 @@ if [[ $machine_os != "Mac" && $machine_os != "Linux" ]]; then
   echo "Only Mac and Linux are currently supported. your machine returned the type of $machine_os"
   exit 1
 fi
+if [[ $shell_type ]]; then
 
+  if [[ $shell_type == "bash" ]]; then
+    cat << EOF
+_local-tap()
+{
+    local cur prev opts
+    COMPREPLY=()
+    cur="\${COMP_WORDS[COMP_CWORD]}"
+    prev="\${COMP_WORDS[COMP_CWORD-1]}"
+    opts="--action --tanzunet-user --tanzunet-password --tbs-descriptor --tce-package-repo-url --tap-package-repo-url --kyverno-package-repo-url --dockerhub-registry-mirror --tap-gui-catalog-url --tap-version --tap-profile --supply-chain --enable-techdocs --techdocs-container-image --techdocs-dind-image --ca-file-path --enable-remote-access --ip-address --insecure-expose-kube-api --install-from-local-registry --target --keep-local-registry --cluster-name --help"
+    if [[ \${cur} == -* ]] ; then
+        COMPREPLY=( \$(compgen -W "\${opts}" -- \${cur}) )
+        return 0
+    fi
+}    
+complete -F _local-tap local-tap
+EOF
+    exit 0
+  else
+    echo "$shell_type is currently not supported for completion"
+    exit 1
+  fi
+fi
 # Validate an action was selected
 if ! [[ $action ]]; then
   echo "You must specify the action the script should perform via the --action flag"
